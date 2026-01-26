@@ -1,0 +1,4 @@
+name = "nba-duos"
+main = "main.py"
+compatibility_flags = ["python_workers"]
+compatibility_date = "2025-11-02"
