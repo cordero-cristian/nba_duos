@@ -1,0 +1,10 @@
+[project]
+name = "nba-duos"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "nba-api>=1.11.3",
+    "plotly>=6.5.2",
+    "streamlit>=1.53.1",
+]
