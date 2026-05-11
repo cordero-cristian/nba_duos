@@ -1,23 +1,46 @@
-import streamlit as st
+import random
+import time
+
 import pandas as pd
 import plotly.express as px
+import streamlit as st
 from nba_api.stats.endpoints import LeagueDashLineups
-from nba_api.stats.library.parameters import PerModeDetailed, MeasureTypeDetailedDefense
+from nba_api.stats.library.parameters import MeasureTypeDetailedDefense, PerModeDetailed
+
+
+REQUEST_TIMEOUT_SECONDS = 20
+REQUEST_RETRIES = 4
+BACKOFF_BASE_SECONDS = 1.2
 
 
 def fetch_duos(season="2025-26"):
-    lineups = LeagueDashLineups(
-        group_quantity=2,
-        per_mode_detailed=PerModeDetailed.per_100_possessions,
-        measure_type_detailed_defense=MeasureTypeDetailedDefense.advanced,
-        season=season,
-        season_type_all_star="Regular Season",
-    )
-    df = lineups.get_data_frames()[0].copy()
-    return df
+    last_error = None
+
+    for attempt in range(1, REQUEST_RETRIES + 1):
+        try:
+            lineups = LeagueDashLineups(
+                group_quantity=2,
+                per_mode_detailed=PerModeDetailed.per_100_possessions,
+                measure_type_detailed_defense=MeasureTypeDetailedDefense.advanced,
+                season=season,
+                season_type_all_star="Regular Season",
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            df = lineups.get_data_frames()[0].copy()
+            return df
+        except Exception as exc:  # network/API instability on cold start
+            last_error = exc
+            if attempt == REQUEST_RETRIES:
+                break
+            sleep_seconds = (BACKOFF_BASE_SECONDS ** attempt) + random.uniform(0.1, 0.5)
+            time.sleep(sleep_seconds)
+
+    raise RuntimeError(
+        f"Failed to fetch NBA duo data for season {season} after {REQUEST_RETRIES} attempts."
+    ) from last_error
 
 
-@st.cache_data(ttl=60 * 60)
+@st.cache_data(ttl=60 * 60, show_spinner=False)
 def fetch_duos_cached(season="2025-26"):
     return fetch_duos(season=season)
 
@@ -164,13 +187,11 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
         height=600,
     )
 
-    # Make “better defense” go up visually
     fig2.update_yaxes(autorange="reversed")
 
     fig2.update_traces(marker=dict(opacity=0.75))
     st.plotly_chart(fig2, use_container_width=True)
 
-    # ---- export + table
     st.download_button(
         "Download filtered duos as CSV",
         dff.to_csv(index=False).encode("utf-8"),
@@ -183,9 +204,11 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
         dff.sort_values("DUO_SCORE", ascending=False)[
             ["TEAM_ABBREVIATION", "GROUP_NAME", "MIN", "POSS", "OFF_RATING", "DEF_RATING", "NET_RATING", "DUO_SCORE"]
         ].head(25),
-        width='stretch',
+        width="stretch",
     )
 
 
-df = fetch_duos_cached("2025-26")
+with st.spinner("Loading duo data from NBA stats..."):
+    df = fetch_duos_cached("2025-26")
+
 build_duo_bubble_chart(df)
