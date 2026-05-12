@@ -11,6 +11,7 @@ from nba_api.stats.library.parameters import MeasureTypeDetailedDefense, PerMode
 REQUEST_TIMEOUT_SECONDS = 20
 REQUEST_RETRIES = 4
 BACKOFF_BASE_SECONDS = 1.2
+SEASON = "2025-26"
 
 
 def fetch_duos(season="2025-26"):
@@ -32,7 +33,7 @@ def fetch_duos(season="2025-26"):
             last_error = exc
             if attempt == REQUEST_RETRIES:
                 break
-            sleep_seconds = (BACKOFF_BASE_SECONDS ** attempt) + random.uniform(0.1, 0.5)
+            sleep_seconds = (BACKOFF_BASE_SECONDS**attempt) + random.uniform(0.1, 0.5)
             time.sleep(sleep_seconds)
 
     raise RuntimeError(
@@ -239,8 +240,21 @@ def build_duo_bubble_chart(df: pd.DataFrame, season: str) -> None:
     )
 
 
-SEASON = "2025-26"
-with st.spinner("Loading NBA 2-man duo data from NBA stats..."):
-    df = fetch_duos_cached(SEASON)
+def run_app() -> None:
+    try:
+        with st.spinner("Loading NBA 2-man duo data from NBA stats..."):
+            df = fetch_duos_cached(SEASON)
+    except RuntimeError as exc:
+        st.error("Could not load NBA duo data right now.")
+        st.info(
+            "The NBA stats API may be temporarily unavailable or blocked from this environment. "
+            "Try reloading in a minute or running the API test script locally."
+        )
+        st.exception(exc)
+        return
 
-build_duo_bubble_chart(df, season=SEASON)
+    build_duo_bubble_chart(df, season=SEASON)
+
+
+if __name__ == "__main__":
+    run_app()
