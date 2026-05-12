@@ -22,6 +22,20 @@ class FetchDuosTests(unittest.TestCase):
         self.assertEqual(len(df), 1)
         self.assertEqual(mock_ctor.call_count, 3)
 
+    def test_fetch_duos_sends_nba_stats_headers(self):
+        fake_df = pd.DataFrame([{"GROUP_ID": "1", "POSS": 1000, "MIN": 400}])
+
+        class FakeResponse:
+            def get_data_frames(self):
+                return [fake_df]
+
+        with patch("main.LeagueDashLineups", return_value=FakeResponse()) as mock_ctor:
+            main.fetch_duos(season="2025-26")
+
+        _, kwargs = mock_ctor.call_args
+        self.assertEqual(kwargs["headers"], main.NBA_STATS_HEADERS)
+        self.assertEqual(kwargs["season"], "2025-26")
+
     def test_fetch_duos_raises_after_max_retries(self):
         with patch("main.LeagueDashLineups", side_effect=Exception("api down")), patch("main.time.sleep"):
             with self.assertRaises(RuntimeError) as cm:

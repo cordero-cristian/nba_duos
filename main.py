@@ -12,6 +12,17 @@ REQUEST_TIMEOUT_SECONDS = 20
 REQUEST_RETRIES = 4
 BACKOFF_BASE_SECONDS = 1.2
 SEASON = "2025-26"
+NBA_STATS_HEADERS = {
+    "Host": "stats.nba.com",
+    "Connection": "keep-alive",
+    "Accept": "application/json, text/plain, */*",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    "Referer": "https://www.nba.com/",
+    "Origin": "https://www.nba.com",
+    "x-nba-stats-origin": "stats",
+    "x-nba-stats-token": "true",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 def fetch_duos(season="2025-26"):
@@ -25,6 +36,7 @@ def fetch_duos(season="2025-26"):
                 measure_type_detailed_defense=MeasureTypeDetailedDefense.advanced,
                 season=season,
                 season_type_all_star="Regular Season",
+                headers=NBA_STATS_HEADERS,
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
             df = lineups.get_data_frames()[0].copy()
