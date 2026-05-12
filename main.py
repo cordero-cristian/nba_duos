@@ -45,11 +45,32 @@ def fetch_duos_cached(season="2025-26"):
     return fetch_duos(season=season)
 
 
-def build_duo_bubble_chart(df: pd.DataFrame) -> None:
-    st.title("NBA Duo Analyzer")
-    st.caption("Bubble chart: possessions vs net rating (bubble size = minutes).")
+def confidence_bucket(poss: float) -> str:
+    if poss >= 1800:
+        return "High"
+    if poss >= 1000:
+        return "Medium"
+    return "Low"
 
-    # ---- filters
+
+def build_duo_bubble_chart(df: pd.DataFrame, season: str) -> None:
+    st.title("Best NBA 2-Man Games")
+    st.subheader("Ranking NBA player pairs by on-court impact when they share the floor")
+    st.caption(
+        "A duo is exactly two players on the same team. Rankings below are regular-season 2-man lineup impact estimates."
+    )
+
+    with st.expander("How this ranking works", expanded=True):
+        st.markdown(
+            """
+            - **Primary ranking metric:** `Duo Score = Net Rating × (Possessions / (Possessions + 1200))`.
+            - **Why this metric:** Net Rating captures impact per 100 possessions; the sample-size factor down-weights tiny samples.
+            - **Data scope:** NBA **Regular Season**, selected season only.
+            - **Reliability cues:** confidence is based on shared possessions (`High >= 1800`, `Medium >= 1000`, else `Low`).
+            - **Tie-breaks:** higher Duo Score first, then higher possessions, then higher minutes.
+            """
+        )
+
     col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
@@ -61,7 +82,7 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
     with col3:
         label_top_n = st.slider("Label top N duos", 0, 50, 15, step=5)
 
-    col4, col5 = st.columns([1, 2])
+    col4, col5, col6 = st.columns([1, 2, 1])
 
     with col4:
         teams = ["ALL"] + sorted(df["TEAM_ABBREVIATION"].unique().tolist())
@@ -70,7 +91,13 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
     with col5:
         search = st.text_input("Search duo (player name)", "")
 
-    # ---- base filtering
+    with col6:
+        confidence_filter = st.multiselect(
+            "Confidence",
+            options=["High", "Medium", "Low"],
+            default=["High", "Medium", "Low"],
+        )
+
     dff = df.copy()
     dff = dff[(dff["POSS"] >= min_poss) & (dff["MIN"] >= min_min)].copy()
 
@@ -80,15 +107,27 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
     if search.strip():
         dff = dff[dff["GROUP_NAME"].str.contains(search, case=False, na=False)].copy()
 
+    dff["CONFIDENCE"] = dff["POSS"].apply(confidence_bucket)
+    if confidence_filter:
+        dff = dff[dff["CONFIDENCE"].isin(confidence_filter)].copy()
+
     if dff.empty:
-        st.warning("No duos match your filters. Lower the minimum possessions/minutes.")
+        st.warning("No duos match your filters. Lower the minimum possessions/minutes or broaden confidence filters.")
         return
 
-    # ---- scoring
     k = 1200
     dff["DUO_SCORE"] = dff["NET_RATING"] * (dff["POSS"] / (dff["POSS"] + k))
+    dff["PAIR"] = dff["GROUP_NAME"].str.replace(" : ", " + ", regex=False)
 
-    # Highlight selection
+    st.markdown("### Top 5 NBA 2-Man Duos")
+    st.caption(f"Season: {season} · Regular Season · Active filters applied")
+    top5 = dff.sort_values(["DUO_SCORE", "POSS", "MIN"], ascending=False).head(5)
+    st.dataframe(
+        top5[["PAIR", "TEAM_ABBREVIATION", "DUO_SCORE", "NET_RATING", "POSS", "MIN", "CONFIDENCE"]],
+        width="stretch",
+        hide_index=True,
+    )
+
     focus_duo = st.selectbox(
         "Highlight a duo (optional)",
         ["None"] + dff.sort_values("DUO_SCORE", ascending=False)["GROUP_NAME"].head(100).tolist(),
@@ -101,17 +140,15 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
     else:
         color_col = "TEAM_ABBREVIATION"
 
-    # ---- labeling
     top_ids = set(dff.nlargest(label_top_n, "DUO_SCORE")["GROUP_ID"].tolist())
     if focus_duo != "None":
         top_ids |= set(dff[dff["GROUP_NAME"] == focus_duo]["GROUP_ID"].tolist())
 
     dff["LABEL"] = dff.apply(
-        lambda r: r["GROUP_NAME"] if r["GROUP_ID"] in top_ids else "",
+        lambda r: r["PAIR"] if r["GROUP_ID"] in top_ids else "",
         axis=1,
     )
 
-    # ---- chart
     fig = px.scatter(
         dff,
         x="POSS",
@@ -119,7 +156,7 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
         size="MIN",
         color=color_col,
         text="LABEL",
-        hover_name="GROUP_NAME",
+        hover_name="PAIR",
         hover_data={
             "TEAM_ABBREVIATION": True,
             "MIN": ":.0f",
@@ -132,8 +169,10 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
             "TM_TOV_PCT": ":.3f",
             "PACE": ":.1f",
             "DUO_SCORE": ":.2f",
+            "CONFIDENCE": True,
             "LABEL": False,
             "GROUP_ID": False,
+            "GROUP_NAME": False,
         },
         labels={
             "POSS": "Possessions Together",
@@ -143,20 +182,10 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
         height=720,
     )
 
-    fig.update_traces(
-        textposition="top center",
-        textfont_size=11,
-        marker=dict(opacity=0.75),
-    )
-
+    fig.update_traces(textposition="top center", textfont_size=11, marker=dict(opacity=0.75))
     fig.add_hline(y=0, line_dash="dash", opacity=0.4)
     fig.add_vline(x=min_poss, line_dash="dash", opacity=0.25)
-
-    fig.update_layout(
-        title="NBA Duos — Impact vs Sample Size",
-        legend_title="Team",
-        margin=dict(l=40, r=40, t=80, b=40),
-    )
+    fig.update_layout(title="NBA 2-Man Game Rankings — Impact vs Sample Size", legend_title="Team")
 
     st.plotly_chart(fig, use_container_width=True)
     st.markdown("### Offense vs Defense (after filters)")
@@ -168,7 +197,7 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
         y="DEF_RATING",
         size="POSS",
         color=color_col,
-        hover_name="GROUP_NAME",
+        hover_name="PAIR",
         hover_data={
             "TEAM_ABBREVIATION": True,
             "MIN": ":.0f",
@@ -177,7 +206,9 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
             "DEF_RATING": ":.1f",
             "NET_RATING": ":.1f",
             "DUO_SCORE": ":.2f",
+            "CONFIDENCE": True,
             "GROUP_ID": False,
+            "GROUP_NAME": False,
         },
         labels={
             "OFF_RATING": "Off Rating",
@@ -188,7 +219,6 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
     )
 
     fig2.update_yaxes(autorange="reversed")
-
     fig2.update_traces(marker=dict(opacity=0.75))
     st.plotly_chart(fig2, use_container_width=True)
 
@@ -201,14 +231,16 @@ def build_duo_bubble_chart(df: pd.DataFrame) -> None:
 
     st.markdown("### Top Duos (after filters)")
     st.dataframe(
-        dff.sort_values("DUO_SCORE", ascending=False)[
-            ["TEAM_ABBREVIATION", "GROUP_NAME", "MIN", "POSS", "OFF_RATING", "DEF_RATING", "NET_RATING", "DUO_SCORE"]
+        dff.sort_values(["DUO_SCORE", "POSS", "MIN"], ascending=False)[
+            ["TEAM_ABBREVIATION", "PAIR", "CONFIDENCE", "MIN", "POSS", "OFF_RATING", "DEF_RATING", "NET_RATING", "DUO_SCORE"]
         ].head(25),
         width="stretch",
+        hide_index=True,
     )
 
 
-with st.spinner("Loading duo data from NBA stats..."):
-    df = fetch_duos_cached("2025-26")
+SEASON = "2025-26"
+with st.spinner("Loading NBA 2-man duo data from NBA stats..."):
+    df = fetch_duos_cached(SEASON)
 
-build_duo_bubble_chart(df)
+build_duo_bubble_chart(df, season=SEASON)
