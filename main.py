@@ -11,6 +11,18 @@ from nba_api.stats.library.parameters import MeasureTypeDetailedDefense, PerMode
 REQUEST_TIMEOUT_SECONDS = 20
 REQUEST_RETRIES = 4
 BACKOFF_BASE_SECONDS = 1.2
+SEASON = "2025-26"
+NBA_STATS_HEADERS = {
+    "Host": "stats.nba.com",
+    "Connection": "keep-alive",
+    "Accept": "application/json, text/plain, */*",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    "Referer": "https://www.nba.com/",
+    "Origin": "https://www.nba.com",
+    "x-nba-stats-origin": "stats",
+    "x-nba-stats-token": "true",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 def fetch_duos(season="2025-26"):
@@ -24,6 +36,7 @@ def fetch_duos(season="2025-26"):
                 measure_type_detailed_defense=MeasureTypeDetailedDefense.advanced,
                 season=season,
                 season_type_all_star="Regular Season",
+                headers=NBA_STATS_HEADERS,
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
             df = lineups.get_data_frames()[0].copy()
@@ -32,7 +45,7 @@ def fetch_duos(season="2025-26"):
             last_error = exc
             if attempt == REQUEST_RETRIES:
                 break
-            sleep_seconds = (BACKOFF_BASE_SECONDS ** attempt) + random.uniform(0.1, 0.5)
+            sleep_seconds = (BACKOFF_BASE_SECONDS**attempt) + random.uniform(0.1, 0.5)
             time.sleep(sleep_seconds)
 
     raise RuntimeError(
@@ -239,8 +252,21 @@ def build_duo_bubble_chart(df: pd.DataFrame, season: str) -> None:
     )
 
 
-SEASON = "2025-26"
-with st.spinner("Loading NBA 2-man duo data from NBA stats..."):
-    df = fetch_duos_cached(SEASON)
+def run_app() -> None:
+    try:
+        with st.spinner("Loading NBA 2-man duo data from NBA stats..."):
+            df = fetch_duos_cached(SEASON)
+    except RuntimeError as exc:
+        st.error("Could not load NBA duo data right now.")
+        st.info(
+            "The NBA stats API may be temporarily unavailable or blocked from this environment. "
+            "Try reloading in a minute or running the API test script locally."
+        )
+        st.exception(exc)
+        return
 
-build_duo_bubble_chart(df, season=SEASON)
+    build_duo_bubble_chart(df, season=SEASON)
+
+
+if __name__ == "__main__":
+    run_app()
